@@ -14,6 +14,7 @@ find_package(nlohmann_json 3.2.0 REQUIRED)
 add_executable(gpmcube
     src/main.cpp
     src/loader/zarr_loader.cpp
+    src/builder/default_cube_builder.cpp
 )
 target_link_libraries(gpmcube PRIVATE ZLIB::ZLIB nlohmann_json::nlohmann_json)
 
