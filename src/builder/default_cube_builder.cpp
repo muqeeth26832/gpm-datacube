@@ -67,8 +67,12 @@ DefaultCubeBuilder::build(
         if (lat_idx < lat_bins &&
             lon_idx < lon_bins)
         {
-            cube.at(t, lat_idx, lon_idx) += nsr[i];
-            count.at(t, lat_idx, lon_idx) += 1;
+            float v = nsr[i];
+            if(v> -9000)
+            {
+                cube.at(t, lat_idx, lon_idx) += nsr[i];
+                count.at(t, lat_idx, lon_idx) += 1;
+            }
         }
     }
 

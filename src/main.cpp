@@ -1,19 +1,104 @@
+#include <cmath>
 #include <cstddef>
 #include <iomanip>
 #include <iostream>
-#include <fstream>
-#include <limits>
 #include <sstream>
 #include <string>
-#include <thread>
-#include <unordered_set>
 #include <vector>
 
+#include "builder/default_cube_builder.h"
 #include "cube/datacube.h"
 #include "loader/zarr_loader.h"
 #include "olap/operations.h"
 
 #include <chrono>
+
+void run(Datacube<float>& cube)
+{
+    std::string cmd;
+
+    std::cout << "\n=== OLAP Console ===\n";
+    std::cout << "Commands:\n";
+    std::cout << "1  global_mean\n";
+    std::cout << "2  rollup_time_sum\n";
+    std::cout << "3  rollup_time_mean\n";
+    std::cout << "4  slice_time <t>\n";
+    std::cout << "5  exit\n\n";
+
+    while (true)
+    {
+        std::cout << ">>> ";
+        std::getline(std::cin, cmd);
+
+        if (cmd == "exit" || cmd == "5")
+            break;
+
+        else if (cmd == "global_mean" || cmd=="1")
+        {
+            float val = olap::global_mean(cube);
+            std::cout << "Global Mean: " << val << "\n";
+        }
+
+        else if (cmd == "rollup_time_sum" || cmd == "2")
+        {
+            auto rolled = olap::rollup_time_sum(cube);
+            std::cout << "Rolled up (sum) over time.\n";
+            std::cout << "Result dims: "
+                      << rolled.time_dim() << " × "
+                      << rolled.lat_dim() << " × "
+                      << rolled.lon_dim() << "\n";
+        }
+
+        else if (cmd == "rollup_time_mean" || cmd=="3")
+        {
+            auto rolled = olap::rollup_time_mean(cube);
+            std::cout << "Rolled up (mean) over time.\n";
+            std::cout << "Result dims: "
+                      << rolled.time_dim() << " × "
+                      << rolled.lat_dim() << " × "
+                      << rolled.lon_dim() << "\n";
+        }
+
+        else if (cmd.rfind("slice_time", 0) == 0)
+        {
+            std::istringstream iss(cmd);
+            std::string temp;
+            size_t t;
+            iss >> temp >> t;
+
+            if (t >= cube.time_dim())
+            {
+                std::cout << "Invalid time index\n";
+                continue;
+            }
+
+            auto slice = olap::slice_time(cube, t);
+
+            std::cout << "Slice at time " << t << "\n";
+            std::cout << "Lat × Lon grid:\n";
+
+            size_t LAT = cube.lat_dim();
+            size_t LON = cube.lon_dim();
+
+            for (size_t i = 0; i < LAT; ++i)
+            {
+                for (size_t j = 0; j < LON; ++j)
+                {
+                    std::cout << std::fixed
+                              << std::setprecision(2)
+                              << slice[i * LON + j] << " ";
+                }
+                std::cout << "\n";
+            }
+        }
+
+        else
+        {
+            std::cout << "Unknown command\n";
+        }
+    }
+}
+
 
 int main() {
     std::string path = "/media/muqeeth26832/KALI LINUX/GPM_DPR_India_2024.zarr/2D/";
@@ -45,41 +130,19 @@ int main() {
     std::cout << "Total load time: " << dur(t0,t4) << " sec\n";
 
 
-    std::cout << "\n=== Dataset Size ===\n";
-    std::cout << "Total observations: " << nsr_data.size() << "\n";
-    std::cout << "Memory (raw floats only): "
-              << nsr_data.size()*sizeof(float)/1024.0/1024.0
-              << " MB\n";
+    std::cout << "Building default cube...\n";
+    auto tcube0 = std::chrono::high_resolution_clock::now();
+    auto cube =
+        DefaultCubeBuilder::build(
+            lat_data,
+            lon_data,
+            nsr_data,
+            timestamp_data);
+    auto tcube1 = std::chrono::high_resolution_clock::now();
+    std::cout << "Total build time: " << dur(tcube0,tcube1) << " sec\n";
+    std::cout << "Cube ready.\n";
 
-    double min_lat = 1e9, max_lat = -1e9;
-    double min_lon = 1e9, max_lon = -1e9;
+    run(cube);
 
-    for (size_t i=0;i<lat_data.size();++i)
-    {
-        min_lat = std::min(min_lat,(double)lat_data[i]);
-        max_lat = std::max(max_lat,(double)lat_data[i]);
-        min_lon = std::min(min_lon,(double)lon_data[i]);
-        max_lon = std::max(max_lon,(double)lon_data[i]);
-    }
-
-    std::cout << "\n=== Spatial Range ===\n";
-    std::cout << "Latitude: " << min_lat << " to " << max_lat << "\n";
-    std::cout << "Longitude: " << min_lon << " to " << max_lon << "\n";
-
-    std::unordered_set<std::string> unique_hour;
-    for (auto& ts : timestamp_data)
-        unique_hour.insert(ts.substr(0,13));
-
-    std::cout << "Unique hourly bins: "
-              << unique_hour.size() << "\n";
-
-    size_t non_zero = 0;
-    for (float v : nsr_data)
-        if (v > 0) non_zero++;
-
-    std::cout << "\n=== Sparsity ===\n";
-    std::cout << "Non-zero ratio: "
-            << (double)non_zero/nsr_data.size()
-            << "\n";
     return 0;
 }
