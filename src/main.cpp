@@ -12,6 +12,31 @@
 #include "olap/operations.h"
 
 #include <chrono>
+#include <fstream>
+
+void export_slice_csv(
+    const std::vector<float>& slice,
+    size_t lat_bins,
+    size_t lon_bins,
+    const std::string& filename)
+{
+    std::ofstream file(filename);
+
+    for (size_t lat = 0; lat < lat_bins; ++lat)
+    {
+        for (size_t lon = 0; lon < lon_bins; ++lon)
+        {
+            file << slice[lat * lon_bins + lon];
+
+            if (lon != lon_bins - 1)
+                file << ",";
+        }
+        file << "\n";
+    }
+
+    file.close();
+}
+
 
 void run(Datacube<float>& cube)
 {
@@ -23,6 +48,7 @@ void run(Datacube<float>& cube)
     std::cout << "2  rollup_time_sum\n";
     std::cout << "3  rollup_time_mean\n";
     std::cout << "4  slice_time <t>\n";
+    std::cout<< "slice_export\n";
     std::cout << "5  exit\n\n";
 
     while (true)
@@ -38,7 +64,6 @@ void run(Datacube<float>& cube)
             float val = olap::global_mean(cube);
             std::cout << "Global Mean: " << val << "\n";
         }
-
         else if (cmd == "rollup_time_sum" || cmd == "2")
         {
             auto rolled = olap::rollup_time_sum(cube);
@@ -48,7 +73,6 @@ void run(Datacube<float>& cube)
                       << rolled.lat_dim() << " × "
                       << rolled.lon_dim() << "\n";
         }
-
         else if (cmd == "rollup_time_mean" || cmd=="3")
         {
             auto rolled = olap::rollup_time_mean(cube);
@@ -57,8 +81,34 @@ void run(Datacube<float>& cube)
                       << rolled.time_dim() << " × "
                       << rolled.lat_dim() << " × "
                       << rolled.lon_dim() << "\n";
-        }
 
+            auto slice = olap::slice_time(rolled, 0);
+
+            // Export
+            std::ofstream file("mean_rainfall.csv");
+
+            size_t LAT = rolled.lat_dim();
+            size_t LON = rolled.lon_dim();
+
+            for (size_t lat = 0; lat < LAT; ++lat)
+            {
+                for (size_t lon = 0; lon < LON; ++lon)
+                {
+                    file << slice[lat * LON + lon];
+
+                    if (lon != LON - 1)
+                        file << ",";
+                }
+                file << "\n";
+            }
+
+            file.close();
+
+            std::cout << "Exported to mean_rainfall.csv\n";
+
+            break;  // exit CLI loop
+
+        }
         else if (cmd.rfind("slice_time", 0) == 0)
         {
             std::istringstream iss(cmd);
@@ -91,7 +141,29 @@ void run(Datacube<float>& cube)
                 std::cout << "\n";
             }
         }
+        else if (cmd.rfind("slice_export", 0) == 0)
+        {
+            std::istringstream iss(cmd);
+            std::string tmp;
+            size_t t;
+            iss >> tmp >> t;
 
+            if (t >= cube.time_dim())
+            {
+                std::cout << "Invalid time index\n";
+                continue;
+            }
+
+            auto slice = olap::slice_time(cube, t);
+
+            export_slice_csv(
+                slice,
+                cube.lat_dim(),
+                cube.lon_dim(),
+                "slice.csv");
+
+            std::cout << "Exported slice to slice.csv\n";
+        }
         else
         {
             std::cout << "Unknown command\n";

@@ -104,4 +104,58 @@ namespace olap {
         return sum / static_cast<double>(T_dim * LAT * LON);
     }
 
+
+    template<typename Dtype>
+    Dtype region_mean(
+        const Datacube<Dtype>& cube,
+        size_t t_start,
+        size_t t_end,
+        size_t lat_start,
+        size_t lat_end,
+        size_t lon_start,
+        size_t lon_end)
+    {
+        Dtype sum = 0;
+        size_t count = 0;
+
+        // checks for input variables
+
+        for (size_t t = t_start; t < t_end; ++t)
+            for (size_t lat = lat_start; lat < lat_end; ++lat)
+                for (size_t lon = lon_start; lon < lon_end; ++lon)
+                {
+                    sum += cube.at(t, lat, lon);
+                    ++count;
+                }
+
+        if (count == 0) return 0;
+
+        return sum / static_cast<Dtype>(count);
+    }
+
+    template<typename Dtype>
+    Datacube<Dtype> dice_time(
+        const Datacube<Dtype>& cube,
+        size_t t_start,
+        size_t t_end)
+    {
+        return dice(cube,
+                    t_start, t_end,
+                    0, cube.lat_dim(),
+                    0, cube.lon_dim());
+    }
+
+    template<typename Dtype>
+    Datacube<Dtype> dice_region(
+        const Datacube<Dtype>& cube,
+        size_t lat_start,
+        size_t lat_end,
+        size_t lon_start,
+        size_t lon_end)
+    {
+        return dice(cube,
+                    0, cube.time_dim(),
+                    lat_start, lat_end,
+                    lon_start, lon_end);
+    }
 } // namespace olap
