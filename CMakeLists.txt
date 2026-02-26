@@ -16,6 +16,7 @@ add_executable(gpmcube
     src/loader/zarr_loader.cpp
     src/builder/default_cube_builder.cpp
     src/builder/simple_cube_builder.cpp
+    src/builder/parallel_simple_cube_builder.cpp
 )
 target_link_libraries(gpmcube PRIVATE ZLIB::ZLIB nlohmann_json::nlohmann_json)
 

@@ -8,11 +8,13 @@
 
 #include "builder/default_cube_builder.h"
 #include "builder/simple_cube_builder.h"
+#include "builder/parallel_simple_cube_builder.h"
 #include "cube/datacube.h"
 #include "cube/simple_cube.h"
 #include "loader/zarr_loader.h"
 #include "olap/operations.h"
 #include "olap/simple_operations.h"
+#include "olap/parallel_operations.h"
 #include "utils/timer.h"
 
 #include <chrono>
@@ -424,6 +426,153 @@ void run_simplecube(SimpleCube<float>& cube, Timer& timer)
     }
 }
 
+void run_benchmark(
+    const std::vector<float>& lat_data,
+    const std::vector<float>& lon_data,
+    const std::vector<float>& nsr_data,
+    const std::vector<std::string>& timestamp_data)
+{
+    std::cout << "\n=== Datacube vs SimpleCube vs Parallel Benchmark ===\n";
+    std::cout << "Comparing Datacube (flat vector), SimpleCube (sequential), and Parallel implementations.\n";
+    std::cout << "Results will be saved to benchmark_results.csv\n\n";
+
+    struct BenchmarkResult {
+        std::string operation;
+        double datacube_time;
+        double simplecube_time;
+        double parallel_time;
+        double speedup_simple;  // datacube / simplecube
+        double speedup_parallel; // datacube / parallel
+    };
+
+    std::vector<BenchmarkResult> results;
+
+    // ---- Build Cube Benchmark ----
+    std::cout << "Benchmarking cube build...\n";
+
+    auto dc_build_start = Timer::now();
+    auto dc_cube = DefaultCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto dc_build_end = Timer::now();
+    double dc_build_time = Timer::elapsed(dc_build_start, dc_build_end);
+
+    auto seq_build_start = Timer::now();
+    auto seq_cube = SimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto seq_build_end = Timer::now();
+    double seq_build_time = Timer::elapsed(seq_build_start, seq_build_end);
+
+    auto par_build_start = Timer::now();
+    auto par_cube = ParallelSimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto par_build_end = Timer::now();
+    double par_build_time = Timer::elapsed(par_build_start, par_build_end);
+
+    results.push_back({"build_cube", dc_build_time, seq_build_time, par_build_time,
+                       dc_build_time / seq_build_time, dc_build_time / par_build_time});
+    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_build_time << "s\n";
+    std::cout << "  SimpleCube:  " << seq_build_time << "s\n";
+    std::cout << "  Parallel:    " << par_build_time << "s\n";
+    std::cout << "  Speedup (SimpleCube): " << (dc_build_time / seq_build_time) << "x\n";
+    std::cout << "  Speedup (Parallel):   " << (dc_build_time / par_build_time) << "x\n\n";
+
+    // ---- Slice Benchmark ----
+    std::cout << "Benchmarking slice_time...\n";
+    size_t slice_t = 0;
+
+    auto dc_slice_start = Timer::now();
+    auto dc_slice = olap::slice_time(dc_cube, slice_t);
+    auto dc_slice_end = Timer::now();
+    double dc_slice_time = Timer::elapsed(dc_slice_start, dc_slice_end);
+
+    auto seq_slice_start = Timer::now();
+    auto seq_slice = simple_olap::slice_time(seq_cube, slice_t);
+    auto seq_slice_end = Timer::now();
+    double seq_slice_time = Timer::elapsed(seq_slice_start, seq_slice_end);
+
+    auto par_slice_start = Timer::now();
+    auto par_slice = parallel_olap::slice_time(par_cube, slice_t);
+    auto par_slice_end = Timer::now();
+    double par_slice_time = Timer::elapsed(par_slice_start, par_slice_end);
+
+    results.push_back({"slice_time", dc_slice_time, seq_slice_time, par_slice_time,
+                       dc_slice_time / seq_slice_time, dc_slice_time / par_slice_time});
+    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_slice_time << "s\n";
+    std::cout << "  SimpleCube:  " << seq_slice_time << "s\n";
+    std::cout << "  Parallel:    " << par_slice_time << "s\n";
+    std::cout << "  Speedup (SimpleCube): " << (dc_slice_time / seq_slice_time) << "x\n";
+    std::cout << "  Speedup (Parallel):   " << (dc_slice_time / par_slice_time) << "x\n\n";
+
+    // ---- Dice Benchmark ----
+    std::cout << "Benchmarking dice_time...\n";
+    size_t dice_t1 = 0, dice_t2 = std::min(size_t(10), dc_cube.time_dim());
+
+    auto dc_dice_start = Timer::now();
+    auto dc_dice = olap::dice_time(dc_cube, dice_t1, dice_t2);
+    auto dc_dice_end = Timer::now();
+    double dc_dice_time = Timer::elapsed(dc_dice_start, dc_dice_end);
+
+    auto seq_dice_start = Timer::now();
+    auto seq_dice = simple_olap::dice_time(seq_cube, dice_t1, dice_t2);
+    auto seq_dice_end = Timer::now();
+    double seq_dice_time = Timer::elapsed(seq_dice_start, seq_dice_end);
+
+    auto par_dice_start = Timer::now();
+    auto par_dice = parallel_olap::dice_time(par_cube, dice_t1, dice_t2);
+    auto par_dice_end = Timer::now();
+    double par_dice_time = Timer::elapsed(par_dice_start, par_dice_end);
+
+    results.push_back({"dice_time", dc_dice_time, seq_dice_time, par_dice_time,
+                       dc_dice_time / seq_dice_time, dc_dice_time / par_dice_time});
+    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_dice_time << "s\n";
+    std::cout << "  SimpleCube:  " << seq_dice_time << "s\n";
+    std::cout << "  Parallel:    " << par_dice_time << "s\n";
+    std::cout << "  Speedup (SimpleCube): " << (dc_dice_time / seq_dice_time) << "x\n";
+    std::cout << "  Speedup (Parallel):   " << (dc_dice_time / par_dice_time) << "x\n\n";
+
+    // ---- Rollup Time Mean Benchmark ----
+    std::cout << "Benchmarking rollup_time_mean...\n";
+
+    auto dc_rollup_start = Timer::now();
+    auto dc_rollup = olap::rollup_time_mean(dc_cube);
+    auto dc_rollup_end = Timer::now();
+    double dc_rollup_time = Timer::elapsed(dc_rollup_start, dc_rollup_end);
+
+    auto seq_rollup_start = Timer::now();
+    auto seq_rollup = simple_olap::rollup_time_mean(seq_cube);
+    auto seq_rollup_end = Timer::now();
+    double seq_rollup_time = Timer::elapsed(seq_rollup_start, seq_rollup_end);
+
+    auto par_rollup_start = Timer::now();
+    auto par_rollup = parallel_olap::rollup_time_mean(par_cube);
+    auto par_rollup_end = Timer::now();
+    double par_rollup_time = Timer::elapsed(par_rollup_start, par_rollup_end);
+
+    results.push_back({"rollup_time_mean", dc_rollup_time, seq_rollup_time, par_rollup_time,
+                       dc_rollup_time / seq_rollup_time, dc_rollup_time / par_rollup_time});
+    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_rollup_time << "s\n";
+    std::cout << "  SimpleCube:  " << seq_rollup_time << "s\n";
+    std::cout << "  Parallel:    " << par_rollup_time << "s\n";
+    std::cout << "  Speedup (SimpleCube): " << (dc_rollup_time / seq_rollup_time) << "x\n";
+    std::cout << "  Speedup (Parallel):   " << (dc_rollup_time / par_rollup_time) << "x\n\n";
+
+    // ---- Export Results ----
+    std::ofstream file("benchmark_results.csv");
+    file << "operation,datacube_time,simplecube_time,parallel_time,speedup_simplecube,speedup_parallel\n";
+    for (const auto& r : results) {
+        file << r.operation << ","
+             << std::fixed << std::setprecision(6)
+             << r.datacube_time << ","
+             << r.simplecube_time << ","
+             << r.parallel_time << ","
+             << std::setprecision(4)
+             << r.speedup_simple << ","
+             << r.speedup_parallel << "\n";
+    }
+    file.close();
+
+    std::cout << "=== Benchmark Complete ===\n";
+    std::cout << "Results exported to benchmark_results.csv\n";
+    std::cout << "Run 'python build/visualize_benchmark.py' to see the comparison graph.\n";
+}
+
 int main() {
     std::string path = "/media/muqeeth26832/KALI LINUX/GPM_DPR_India_2024.zarr/2D/";
 
@@ -431,6 +580,7 @@ int main() {
     std::cout << "Select cube type:\n";
     std::cout << "1. Datacube (flat vector storage)\n";
     std::cout << "2. SimpleCube (3D vector storage)\n";
+    std::cout << "3. Benchmark (Sequential vs Parallel)\n";
     std::cout << "Choice: ";
 
     std::string choice;
@@ -479,6 +629,19 @@ int main() {
         std::cout << "Cube ready.\n";
 
         run_datacube(cube);
+    }
+    else if (choice == "3")
+    {
+        // Benchmark mode
+        std::cout << "\nLoading data for benchmark...\n";
+
+        auto nsr_data = ZarrLoader::load_float_array(path + "nsr");
+        auto lat_data = ZarrLoader::load_float_array(path + "lat");
+        auto lon_data = ZarrLoader::load_float_array(path + "lon");
+        auto timestamp_data = ZarrLoader::load_string_array(path + "timestamps");
+
+        std::cout << "Data loaded. Starting benchmark...\n";
+        run_benchmark(lat_data, lon_data, nsr_data, timestamp_data);
     }
     else
     {
