@@ -9,6 +9,7 @@ include_directories(src)
 
 find_package(ZLIB REQUIRED)
 find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(OpenMP REQUIRED)
 
 # Main
 add_executable(gpmcube
@@ -18,7 +19,7 @@ add_executable(gpmcube
     src/builder/simple_cube_builder.cpp
     src/builder/parallel_simple_cube_builder.cpp
 )
-target_link_libraries(gpmcube PRIVATE ZLIB::ZLIB nlohmann_json::nlohmann_json)
+target_link_libraries(gpmcube PRIVATE ZLIB::ZLIB nlohmann_json::nlohmann_json OpenMP::OpenMP_CXX)
 
 # Test executable
 add_executable(test_datacube

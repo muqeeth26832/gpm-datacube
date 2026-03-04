@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "benchmark/slice_full_sweep.h"
 #include "builder/default_cube_builder.h"
 #include "builder/simple_cube_builder.h"
 #include "builder/parallel_simple_cube_builder.h"
@@ -15,7 +16,11 @@
 #include "olap/operations.h"
 #include "olap/simple_operations.h"
 #include "olap/parallel_operations.h"
+#include "olap/omp_operations.h"
 #include "utils/timer.h"
+#include "./benchmark/slice_full_sweep.h"
+#include "./benchmark/synthetic_cube.h"
+#include "./benchmark/size_sweep_benchmark.h"
 
 #include <chrono>
 #include <fstream>
@@ -426,6 +431,18 @@ void run_simplecube(SimpleCube<float>& cube, Timer& timer)
     }
 }
 
+void run_size_sweep_benchmark()
+{
+    std::cout << "\n=== Size Benchmark Suite ===\n";
+    std::cout << "Comparing: Sequential vs std::thread vs OMP (default, chunk, tile, cubed)\n";
+    std::cout << "Varying: Cube size (LAT × LON)\n\n";
+
+    // Test sizes: 128 to 2048
+    std::vector<int> sizes = {128, 256, 512, 1024, 2048,2<<20};
+
+    benchmark::run_full_size(sizes, 5);
+}
+
 void run_benchmark(
     const std::vector<float>& lat_data,
     const std::vector<float>& lon_data,
@@ -577,10 +594,12 @@ int main() {
     std::string path = "/media/muqeeth26832/KALI LINUX/GPM_DPR_India_2024.zarr/2D/";
 
     std::cout << "=== GPM Datacube Project ===\n";
-    std::cout << "Select cube type:\n";
+    std::cout << "Select mode:\n";
     std::cout << "1. Datacube (flat vector storage)\n";
     std::cout << "2. SimpleCube (3D vector storage)\n";
-    std::cout << "3. Benchmark (Sequential vs Parallel)\n";
+    std::cout << "3. Basic Benchmark (Datacube vs SimpleCube vs Parallel)\n";
+    std::cout << "4. Size Benchmark ALL(Vary cube size, compare implementations)\n";
+    std::cout << "5. Slice Full Sweep (Vary size, threads, chunk, tile)\n";
     std::cout << "Choice: ";
 
     std::string choice;
@@ -632,7 +651,7 @@ int main() {
     }
     else if (choice == "3")
     {
-        // Benchmark mode
+        // Basic benchmark mode
         std::cout << "\nLoading data for benchmark...\n";
 
         auto nsr_data = ZarrLoader::load_float_array(path + "nsr");
@@ -640,8 +659,30 @@ int main() {
         auto lon_data = ZarrLoader::load_float_array(path + "lon");
         auto timestamp_data = ZarrLoader::load_string_array(path + "timestamps");
 
-        std::cout << "Data loaded. Starting benchmark...\n";
         run_benchmark(lat_data, lon_data, nsr_data, timestamp_data);
+    }
+    else if (choice == "4")
+    {
+        // Size sweep benchmark (synthetic cubes)
+        run_size_sweep_benchmark();
+    }
+    else if (choice == "5")
+    {
+        std::cout << "Slice benchmarks (full sweep)...\n";
+
+        benchmark::SweepConfig config;
+
+        config.sizes = {256, 512, 1024, 2048};
+        config.threads = {1, 2, 4, 8};
+        config.chunk_sizes = {1, 8, 32, 128};
+        config.tile_sizes = {8, 16, 32, 64};
+        config.trials = 5;
+
+        benchmark::run_full_slice_sweep(
+            config,
+            "slice_full_sweep.csv");
+
+        std::cout << "Full slice sweep saved to slice_full_sweep.csv\n";
     }
     else
     {
