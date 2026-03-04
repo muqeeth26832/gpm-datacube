@@ -1,283 +1,238 @@
 #!/usr/bin/env python3
 """
-Visualize benchmark results comparing Datacube vs SimpleCube vs Parallel implementations.
-Generates bar charts and speedup comparisons for performance analysis.
+Benchmark Visualization Tool
+
+Compares:
+    - Datacube (flat vector)
+    - SimpleCube (sequential)
+    - SimpleCube (std::thread)
+    - SimpleCube (OpenMP)
+
+Produces:
+    1. Runtime comparison chart
+    2. Speedup comparison chart
+    3. Combined dashboard
+
+Designed for systems benchmarking / OLAP evaluation.
 """
 
 import csv
 import sys
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 
-def load_benchmark_data(filename: str) -> dict:
-    """Load benchmark results from CSV file."""
-    data = {
-        'operation': [],
-        'datacube': [],
-        'simplecube': [],
-        'parallel': [],
-        'speedup_simple': [],
-        'speedup_parallel': []
-    }
-    
-    with open(filename, 'r') as f:
+# ------------------------------------------------------------
+# Load CSV
+# ------------------------------------------------------------
+
+def load_data(filename: str):
+
+    ops = []
+    datacube = []
+    simple = []
+    thread = []
+    omp = []
+
+    s_simple = []
+    s_thread = []
+    s_omp = []
+
+    with open(filename) as f:
+
         reader = csv.DictReader(f)
-        for row in reader:
-            data['operation'].append(row['operation'])
-            data['datacube'].append(float(row['datacube_time']))
-            data['simplecube'].append(float(row['simplecube_time']))
-            data['parallel'].append(float(row['parallel_time']))
-            data['speedup_simple'].append(float(row['speedup_simplecube']))
-            data['speedup_parallel'].append(float(row['speedup_parallel']))
-    
-    return data
+
+        for r in reader:
+
+            ops.append(r["operation"])
+
+            datacube.append(float(r["datacube_time"]))
+            simple.append(float(r["simple_time"]))
+            thread.append(float(r["thread_time"]))
+            omp.append(float(r["omp_time"]))
+
+            s_simple.append(float(r["speedup_simple"]))
+            s_thread.append(float(r["speedup_thread"]))
+            s_omp.append(float(r["speedup_omp"]))
+
+    return {
+        "ops": ops,
+        "datacube": np.array(datacube),
+        "simple": np.array(simple),
+        "thread": np.array(thread),
+        "omp": np.array(omp),
+        "s_simple": np.array(s_simple),
+        "s_thread": np.array(s_thread),
+        "s_omp": np.array(s_omp),
+    }
 
 
-def plot_comparison_bar(data: dict, output: str | None = None) -> None:
-    """Create a grouped bar chart comparing all three implementations."""
-    operations = data['operation']
-    datacube = data['datacube']
-    simplecube = data['simplecube']
-    parallel = data['parallel']
-    
-    x = np.arange(len(operations))
-    width = 0.25
-    
-    fig, ax = plt.subplots(figsize=(14, 7))
-    
-    bars1 = ax.bar(x - width, datacube, width, label='Datacube (flat vector)', 
-                   color='#e74c3c', alpha=0.8)
-    bars2 = ax.bar(x, simplecube, width, label='SimpleCube (sequential)', 
-                   color='#3498db', alpha=0.8)
-    bars3 = ax.bar(x + width, parallel, width, label='SimpleCube (parallel)', 
-                   color='#2ecc71', alpha=0.8)
-    
-    ax.set_ylabel('Time (seconds)', fontsize=12)
-    ax.set_xlabel('Operation', fontsize=12)
-    ax.set_title('Performance Comparison: Datacube vs SimpleCube vs Parallel', 
-                 fontsize=14, fontweight='bold')
+# ------------------------------------------------------------
+# Runtime Plot
+# ------------------------------------------------------------
+
+def plot_runtime(data, outfile):
+
+    ops = data["ops"]
+    x = np.arange(len(ops))
+    w = 0.2
+
+    fig, ax = plt.subplots(figsize=(12,6))
+
+    ax.bar(x-1.5*w, data["datacube"], w, label="Datacube", color="#e74c3c")
+    ax.bar(x-0.5*w, data["simple"], w, label="SimpleCube (seq)", color="#3498db")
+    ax.bar(x+0.5*w, data["thread"], w, label="SimpleCube (thread)", color="#2ecc71")
+    ax.bar(x+1.5*w, data["omp"], w, label="SimpleCube (OpenMP)", color="#9b59b6")
+
+    ax.set_yscale("log")  # important for benchmarks
+
+    ax.set_ylabel("Runtime (seconds)")
+    ax.set_title("Execution Time Comparison")
     ax.set_xticks(x)
-    ax.set_xticklabels(operations, rotation=15, ha='right')
-    ax.legend(fontsize=11)
-    ax.grid(axis='y', alpha=0.3, linestyle='--')
-    
-    # Add value labels on bars
-    for bar in bars1:
-        height = bar.get_height()
-        ax.annotate(f'{height:.4f}',
-                    xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha='center', va='bottom', fontsize=8)
-    
-    for bar in bars2:
-        height = bar.get_height()
-        ax.annotate(f'{height:.4f}',
-                    xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha='center', va='bottom', fontsize=8)
-    
-    for bar in bars3:
-        height = bar.get_height()
-        ax.annotate(f'{height:.4f}',
-                    xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha='center', va='bottom', fontsize=8)
-    
+    ax.set_xticklabels(ops, rotation=15)
+
+    ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+    ax.legend()
+
     plt.tight_layout()
-    
-    if output:
-        plt.savefig(output, dpi=150, bbox_inches='tight')
-        print(f"Saved bar chart to {output}")
-    else:
-        plt.show()
+    plt.savefig(outfile, dpi=200)
+    print(f"Saved runtime plot → {outfile}")
 
 
-def plot_speedup_comparison(data: dict, output: str | None = None) -> None:
-    """Create a grouped bar chart showing speedup for both SimpleCube and Parallel."""
-    operations = data['operation']
-    speedup_simple = data['speedup_simple']
-    speedup_parallel = data['speedup_parallel']
-    
-    x = np.arange(len(operations))
-    width = 0.35
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    
-    bars1 = ax.bar(x - width/2, speedup_simple, width, label='SimpleCube Speedup', 
-                   color='#3498db', alpha=0.8)
-    bars2 = ax.bar(x + width/2, speedup_parallel, width, label='Parallel Speedup', 
-                   color='#2ecc71', alpha=0.8)
-    
-    ax.axhline(y=1, color='red', linestyle='--', linewidth=2, label='Break-even (1x)')
-    
-    ax.set_ylabel('Speedup (Datacube / Implementation)', fontsize=12)
-    ax.set_xlabel('Operation', fontsize=12)
-    ax.set_title('Speedup Comparison (relative to Datacube)', fontsize=14, fontweight='bold')
+# ------------------------------------------------------------
+# Speedup Plot
+# ------------------------------------------------------------
+
+def plot_speedup(data, outfile):
+
+    ops = data["ops"]
+    x = np.arange(len(ops))
+    w = 0.25
+
+    fig, ax = plt.subplots(figsize=(12,6))
+
+    ax.bar(x-w, data["s_simple"], w, label="SimpleCube", color="#3498db")
+    ax.bar(x, data["s_thread"], w, label="Thread", color="#2ecc71")
+    ax.bar(x+w, data["s_omp"], w, label="OpenMP", color="#9b59b6")
+
+    ax.axhline(1.0, linestyle="--", color="red", linewidth=2)
+
+    ax.set_ylabel("Speedup vs Datacube")
+    ax.set_title("Speedup Comparison")
     ax.set_xticks(x)
-    ax.set_xticklabels(operations, rotation=15, ha='right')
-    ax.legend(fontsize=11)
-    ax.grid(axis='y', alpha=0.3, linestyle='--')
-    
-    # Add value labels
-    for bar, s in zip(bars1, speedup_simple):
-        height = bar.get_height()
-        ax.annotate(f'{s:.2f}x',
-                    xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha='center', va='bottom', fontsize=10)
-    
-    for bar, s in zip(bars2, speedup_parallel):
-        height = bar.get_height()
-        ax.annotate(f'{s:.2f}x',
-                    xy=(bar.get_x() + bar.get_width()/2, height),
-                    xytext=(0, 3),
-                    textcoords="offset points",
-                    ha='center', va='bottom', fontsize=10)
-    
+    ax.set_xticklabels(ops, rotation=15)
+
+    ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+    ax.legend()
+
     plt.tight_layout()
-    
-    if output:
-        plt.savefig(output, dpi=150, bbox_inches='tight')
-        print(f"Saved speedup chart to {output}")
-    else:
-        plt.show()
+    plt.savefig(outfile, dpi=200)
+    print(f"Saved speedup plot → {outfile}")
 
 
-def plot_combined(data: dict, output: str | None = None) -> None:
-    """Create a combined visualization with time comparison and speedup."""
-    operations = data['operation']
-    datacube = data['datacube']
-    simplecube = data['simplecube']
-    parallel = data['parallel']
-    speedup_simple = data['speedup_simple']
-    speedup_parallel = data['speedup_parallel']
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
-    
-    # Left: Time comparison
-    x = np.arange(len(operations))
-    width = 0.25
-    
-    bars1 = ax1.bar(x - width, datacube, width, label='Datacube', 
-                    color='#e74c3c', alpha=0.8)
-    bars2 = ax1.bar(x, simplecube, width, label='SimpleCube (seq)', 
-                    color='#3498db', alpha=0.8)
-    bars3 = ax1.bar(x + width, parallel, width, label='SimpleCube (parallel)', 
-                    color='#2ecc71', alpha=0.8)
-    
-    ax1.set_ylabel('Time (seconds)', fontsize=11)
-    ax1.set_xlabel('Operation', fontsize=11)
-    ax1.set_title('Execution Time Comparison', fontsize=13, fontweight='bold')
+# ------------------------------------------------------------
+# Combined Dashboard
+# ------------------------------------------------------------
+
+def plot_dashboard(data, outfile):
+
+    ops = data["ops"]
+    x = np.arange(len(ops))
+    w = 0.2
+
+    fig,(ax1,ax2) = plt.subplots(1,2,figsize=(16,6))
+
+    # runtime
+    ax1.bar(x-1.5*w,data["datacube"],w,label="Datacube")
+    ax1.bar(x-0.5*w,data["simple"],w,label="Simple")
+    ax1.bar(x+0.5*w,data["thread"],w,label="Thread")
+    ax1.bar(x+1.5*w,data["omp"],w,label="OpenMP")
+
+    ax1.set_yscale("log")
+    ax1.set_title("Runtime Comparison")
     ax1.set_xticks(x)
-    ax1.set_xticklabels(operations, rotation=15, ha='right')
-    ax1.legend(fontsize=10)
-    ax1.grid(axis='y', alpha=0.3, linestyle='--')
-    
-    # Right: Speedup comparison
-    x2 = np.arange(len(operations))
-    width2 = 0.35
-    
-    colors1 = ['#3498db' if s >= 1 else '#e67e22' for s in speedup_simple]
-    colors2 = ['#2ecc71' if s >= 1 else '#e67e22' for s in speedup_parallel]
-    
-    bars_s1 = ax2.bar(x2 - width2/2, speedup_simple, width2, color=colors1, 
-                      alpha=0.8, edgecolor='black', linewidth=1.2, label='SimpleCube')
-    bars_s2 = ax2.bar(x2 + width2/2, speedup_parallel, width2, color=colors2, 
-                      alpha=0.8, edgecolor='black', linewidth=1.2, label='Parallel')
-    
-    ax2.axhline(y=1, color='red', linestyle='--', linewidth=2, label='Break-even (1x)')
-    
-    ax2.set_ylabel('Speedup (Datacube / Implementation)', fontsize=11)
-    ax2.set_xlabel('Operation', fontsize=11)
-    ax2.set_title('Speedup Comparison', fontsize=13, fontweight='bold')
-    ax2.set_xticks(x2)
-    ax2.set_xticklabels(operations, rotation=15, ha='right')
-    ax2.legend(fontsize=10)
-    ax2.grid(axis='y', alpha=0.3, linestyle='--')
-    
-    # Add value labels on speedup chart
-    for bar, s in zip(bars_s1, speedup_simple):
-        height = bar.get_height()
-        ax2.annotate(f'{s:.2f}x',
-                     xy=(bar.get_x() + bar.get_width()/2, height),
-                     xytext=(0, 3),
-                     textcoords="offset points",
-                     ha='center', va='bottom', fontsize=9)
-    
-    for bar, s in zip(bars_s2, speedup_parallel):
-        height = bar.get_height()
-        ax2.annotate(f'{s:.2f}x',
-                     xy=(bar.get_x() + bar.get_width()/2, height),
-                     xytext=(0, 3),
-                     textcoords="offset points",
-                     ha='center', va='bottom', fontsize=9)
-    
-    plt.suptitle('Datacube vs SimpleCube vs Parallel - Performance Benchmark', 
-                 fontsize=16, fontweight='bold', y=1.02)
+    ax1.set_xticklabels(ops,rotation=15)
+    ax1.set_ylabel("Seconds")
+    ax1.grid(True,axis="y",linestyle="--",alpha=0.4)
+    ax1.legend()
+
+    # speedup
+    w2 = 0.25
+    ax2.bar(x-w2,data["s_simple"],w2,label="Simple")
+    ax2.bar(x,data["s_thread"],w2,label="Thread")
+    ax2.bar(x+w2,data["s_omp"],w2,label="OpenMP")
+
+    ax2.axhline(1,color="red",linestyle="--")
+
+    ax2.set_title("Speedup vs Datacube")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(ops,rotation=15)
+    ax2.set_ylabel("Speedup")
+    ax2.grid(True,axis="y",linestyle="--",alpha=0.4)
+    ax2.legend()
+
+    plt.suptitle("OLAP Datacube Benchmark")
+
     plt.tight_layout()
-    
-    if output:
-        plt.savefig(output, dpi=150, bbox_inches='tight')
-        print(f"Saved combined chart to {output}")
-    else:
-        plt.show()
+    plt.savefig(outfile,dpi=200)
+
+    print(f"Saved dashboard → {outfile}")
 
 
-def print_summary(data: dict) -> None:
-    """Print a text summary of the benchmark results."""
-    print("\n" + "=" * 80)
-    print("BENCHMARK SUMMARY: Datacube vs SimpleCube vs Parallel")
-    print("=" * 80)
-    print(f"{'Operation':<20} {'Datacube':<12} {'SimpleCube':<12} {'Parallel':<12} {'Speedup(SC)':<12} {'Speedup(P)':<10}")
-    print("-" * 80)
-    
-    for i, op in enumerate(data['operation']):
-        print(f"{op:<20} {data['datacube'][i]:<12.6f} {data['simplecube'][i]:<12.6f} "
-              f"{data['parallel'][i]:<12.6f} {data['speedup_simple'][i]:<12.2f}x "
-              f"{data['speedup_parallel'][i]:<10.2f}x")
-    
-    print("-" * 80)
-    avg_speedup_sc = sum(data['speedup_simple']) / len(data['speedup_simple'])
-    avg_speedup_p = sum(data['speedup_parallel']) / len(data['speedup_parallel'])
-    print(f"{'Average Speedup:':<20} {'':<12} {'':<12} {'':<12} {avg_speedup_sc:<12.2f}x {avg_speedup_p:<10.2f}x")
-    print("=" * 80 + "\n")
+# ------------------------------------------------------------
+# Text Summary
+# ------------------------------------------------------------
 
+def print_summary(data):
+
+    print("\nBenchmark Summary\n")
+    print(f"{'Operation':<20}{'Datacube':<12}{'Seq':<12}{'Thread':<12}{'OMP':<12}")
+
+    for i,op in enumerate(data["ops"]):
+
+        print(
+            f"{op:<20}"
+            f"{data['datacube'][i]:<12.6f}"
+            f"{data['simple'][i]:<12.6f}"
+            f"{data['thread'][i]:<12.6f}"
+            f"{data['omp'][i]:<12.6f}"
+        )
+
+    print()
+
+    print("Average Speedups")
+
+    print(f"Simple  : {np.mean(data['s_simple']):.2f}x")
+    print(f"Thread  : {np.mean(data['s_thread']):.2f}x")
+    print(f"OpenMP  : {np.mean(data['s_omp']):.2f}x")
+
+
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
 
 def main():
-    filename = "benchmark_results.csv"
-    output_combined = "benchmark_comparison.png"
-    output_bar = "benchmark_time_comparison.png"
-    output_speedup = "benchmark_speedup.png"
-    
-    # Parse arguments
+
+    file = "benchmark_results.csv"
+
     if len(sys.argv) > 1:
-        filename = sys.argv[1]
-    if len(sys.argv) > 2:
-        output_combined = sys.argv[2]
-    
-    try:
-        data = load_benchmark_data(filename)
-    except FileNotFoundError:
-        print(f"Error: File '{filename}' not found.")
-        print("Run the benchmark first: ./build/gpmcube (select option 3)")
-        sys.exit(1)
-    
+        file = sys.argv[1]
+
+    if not Path(file).exists():
+        print("Benchmark file not found.")
+        print("Run: ./gpmcube → option 3")
+        return
+
+    data = load_data(file)
+
     print_summary(data)
-    
-    # Generate plots
-    plot_combined(data, output_combined)
-    plot_comparison_bar(data, output_bar)
-    plot_speedup_comparison(data, output_speedup)
-    
-    print("\nVisualization complete!")
-    print(f"  - {output_combined} (combined view)")
-    print(f"  - {output_bar} (time comparison)")
-    print(f"  - {output_speedup} (speedup comparison)")
+
+    plot_runtime(data,"vb/runtime_comparison.png")
+    plot_speedup(data,"vb/peedup_comparison.png")
+    plot_dashboard(data,"vb/benchmark_dashboard.png")
+
+    print("\nAll plots generated.\n")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-#include "benchmark/slice_full_sweep.h"
 #include "builder/default_cube_builder.h"
 #include "builder/simple_cube_builder.h"
 #include "builder/parallel_simple_cube_builder.h"
@@ -18,66 +17,18 @@
 #include "olap/parallel_operations.h"
 #include "olap/omp_operations.h"
 #include "utils/timer.h"
-#include "./benchmark/slice_full_sweep.h"
-#include "./benchmark/synthetic_cube.h"
-#include "./benchmark/size_sweep_benchmark.h"
+#include "builder/omp_sc_builder.h"
+
+#include "benchmark/benchmark_runner.h"
 
 #include <chrono>
 #include <fstream>
-
-void export_slice_csv(
-    const std::vector<float>& slice,
-    size_t lat_bins,
-    size_t lon_bins,
-    const std::string& filename)
-{
-    std::ofstream file(filename);
-
-    for (size_t lat = 0; lat < lat_bins; ++lat)
-    {
-        for (size_t lon = 0; lon < lon_bins; ++lon)
-        {
-            file << slice[lat * lon_bins + lon];
-
-            if (lon != lon_bins - 1)
-                file << ",";
-        }
-        file << "\n";
-    }
-
-    file.close();
-}
-
-void export_simple_cube_csv(
-    const SimpleCube<float>& cube,
-    size_t t,
-    const std::string& filename)
-{
-    std::ofstream file(filename);
-
-    size_t LAT = cube.lat_dim();
-    size_t LON = cube.lon_dim();
-
-    for (size_t lat = 0; lat < LAT; ++lat)
-    {
-        for (size_t lon = 0; lon < LON; ++lon)
-        {
-            file << cube.at(t, lat, lon);
-
-            if (lon != LON - 1)
-                file << ",";
-        }
-        file << "\n";
-    }
-
-    file.close();
-}
 
 void run_datacube(Datacube<float>& cube)
 {
     std::string cmd;
 
-    std::cout << "\n=== OLAP Console (Datacube) ===\n";
+    std::cout << "\n=== OAP Console (Datacube) ===\n";
     std::cout << "Commands:\n";
     std::cout << "1  global_mean\n";
     std::cout << "2  rollup_time_sum\n";
@@ -264,8 +215,8 @@ void run_simplecube(SimpleCube<float>& cube, Timer& timer)
                       << rolled.lat_dim() << " × "
                       << rolled.lon_dim() << "\n";
 
-            export_simple_cube_csv(rolled, 0, "mean_rainfall_simple.csv");
-            std::cout << "Exported to mean_rainfall_simple.csv\n";
+            // export_simple_cube_csv(rolled, 0, "mean_rainfall_simple.csv");
+            // std::cout << "Exported to mean_rainfall_simple.csv\n";
         }
         else if (cmd.rfind("slice_time", 0) == 0)
         {
@@ -385,7 +336,7 @@ void run_simplecube(SimpleCube<float>& cube, Timer& timer)
 
             auto t0 = Timer::now();
             auto slice = simple_olap::slice_time(cube, t);
-            export_simple_cube_csv(slice, 0, "slice_simple.csv");
+            // export_simple_cube_csv(slice, 0, "slice_simple.csv");
             auto t1 = Timer::now();
             timer.record("slice_time", Timer::elapsed(t0, t1));
 
@@ -431,175 +382,40 @@ void run_simplecube(SimpleCube<float>& cube, Timer& timer)
     }
 }
 
-void run_size_sweep_benchmark()
-{
-    std::cout << "\n=== Size Benchmark Suite ===\n";
-    std::cout << "Comparing: Sequential vs std::thread vs OMP (default, chunk, tile, cubed)\n";
-    std::cout << "Varying: Cube size (LAT × LON)\n\n";
 
-    // Test sizes: 128 to 2048
-    std::vector<int> sizes = {128, 256, 512, 1024, 2048,2<<20};
-
-    benchmark::run_full_size(sizes, 5);
-}
 
 void run_benchmark(
     const std::vector<float>& lat_data,
     const std::vector<float>& lon_data,
     const std::vector<float>& nsr_data,
-    const std::vector<std::string>& timestamp_data)
-{
-    std::cout << "\n=== Datacube vs SimpleCube vs Parallel Benchmark ===\n";
-    std::cout << "Comparing Datacube (flat vector), SimpleCube (sequential), and Parallel implementations.\n";
-    std::cout << "Results will be saved to benchmark_results.csv\n\n";
+    const std::vector<std::string>& timestamp_data);
 
-    struct BenchmarkResult {
-        std::string operation;
-        double datacube_time;
-        double simplecube_time;
-        double parallel_time;
-        double speedup_simple;  // datacube / simplecube
-        double speedup_parallel; // datacube / parallel
-    };
+void run_benchmark_generic(size_t T,size_t LAT,size_t LON);
 
-    std::vector<BenchmarkResult> results;
 
-    // ---- Build Cube Benchmark ----
-    std::cout << "Benchmarking cube build...\n";
+int main(int argc,char** argv) {
 
-    auto dc_build_start = Timer::now();
-    auto dc_cube = DefaultCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
-    auto dc_build_end = Timer::now();
-    double dc_build_time = Timer::elapsed(dc_build_start, dc_build_end);
+    if(argc == 4)
+    {
+        size_t T   = std::stoul(argv[1]);
+        size_t LAT = std::stoul(argv[2]);
+        size_t LON = std::stoul(argv[3]);
 
-    auto seq_build_start = Timer::now();
-    auto seq_cube = SimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
-    auto seq_build_end = Timer::now();
-    double seq_build_time = Timer::elapsed(seq_build_start, seq_build_end);
-
-    auto par_build_start = Timer::now();
-    auto par_cube = ParallelSimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
-    auto par_build_end = Timer::now();
-    double par_build_time = Timer::elapsed(par_build_start, par_build_end);
-
-    results.push_back({"build_cube", dc_build_time, seq_build_time, par_build_time,
-                       dc_build_time / seq_build_time, dc_build_time / par_build_time});
-    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_build_time << "s\n";
-    std::cout << "  SimpleCube:  " << seq_build_time << "s\n";
-    std::cout << "  Parallel:    " << par_build_time << "s\n";
-    std::cout << "  Speedup (SimpleCube): " << (dc_build_time / seq_build_time) << "x\n";
-    std::cout << "  Speedup (Parallel):   " << (dc_build_time / par_build_time) << "x\n\n";
-
-    // ---- Slice Benchmark ----
-    std::cout << "Benchmarking slice_time...\n";
-    size_t slice_t = 0;
-
-    auto dc_slice_start = Timer::now();
-    auto dc_slice = olap::slice_time(dc_cube, slice_t);
-    auto dc_slice_end = Timer::now();
-    double dc_slice_time = Timer::elapsed(dc_slice_start, dc_slice_end);
-
-    auto seq_slice_start = Timer::now();
-    auto seq_slice = simple_olap::slice_time(seq_cube, slice_t);
-    auto seq_slice_end = Timer::now();
-    double seq_slice_time = Timer::elapsed(seq_slice_start, seq_slice_end);
-
-    auto par_slice_start = Timer::now();
-    auto par_slice = parallel_olap::slice_time(par_cube, slice_t);
-    auto par_slice_end = Timer::now();
-    double par_slice_time = Timer::elapsed(par_slice_start, par_slice_end);
-
-    results.push_back({"slice_time", dc_slice_time, seq_slice_time, par_slice_time,
-                       dc_slice_time / seq_slice_time, dc_slice_time / par_slice_time});
-    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_slice_time << "s\n";
-    std::cout << "  SimpleCube:  " << seq_slice_time << "s\n";
-    std::cout << "  Parallel:    " << par_slice_time << "s\n";
-    std::cout << "  Speedup (SimpleCube): " << (dc_slice_time / seq_slice_time) << "x\n";
-    std::cout << "  Speedup (Parallel):   " << (dc_slice_time / par_slice_time) << "x\n\n";
-
-    // ---- Dice Benchmark ----
-    std::cout << "Benchmarking dice_time...\n";
-    size_t dice_t1 = 0, dice_t2 = std::min(size_t(10), dc_cube.time_dim());
-
-    auto dc_dice_start = Timer::now();
-    auto dc_dice = olap::dice_time(dc_cube, dice_t1, dice_t2);
-    auto dc_dice_end = Timer::now();
-    double dc_dice_time = Timer::elapsed(dc_dice_start, dc_dice_end);
-
-    auto seq_dice_start = Timer::now();
-    auto seq_dice = simple_olap::dice_time(seq_cube, dice_t1, dice_t2);
-    auto seq_dice_end = Timer::now();
-    double seq_dice_time = Timer::elapsed(seq_dice_start, seq_dice_end);
-
-    auto par_dice_start = Timer::now();
-    auto par_dice = parallel_olap::dice_time(par_cube, dice_t1, dice_t2);
-    auto par_dice_end = Timer::now();
-    double par_dice_time = Timer::elapsed(par_dice_start, par_dice_end);
-
-    results.push_back({"dice_time", dc_dice_time, seq_dice_time, par_dice_time,
-                       dc_dice_time / seq_dice_time, dc_dice_time / par_dice_time});
-    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_dice_time << "s\n";
-    std::cout << "  SimpleCube:  " << seq_dice_time << "s\n";
-    std::cout << "  Parallel:    " << par_dice_time << "s\n";
-    std::cout << "  Speedup (SimpleCube): " << (dc_dice_time / seq_dice_time) << "x\n";
-    std::cout << "  Speedup (Parallel):   " << (dc_dice_time / par_dice_time) << "x\n\n";
-
-    // ---- Rollup Time Mean Benchmark ----
-    std::cout << "Benchmarking rollup_time_mean...\n";
-
-    auto dc_rollup_start = Timer::now();
-    auto dc_rollup = olap::rollup_time_mean(dc_cube);
-    auto dc_rollup_end = Timer::now();
-    double dc_rollup_time = Timer::elapsed(dc_rollup_start, dc_rollup_end);
-
-    auto seq_rollup_start = Timer::now();
-    auto seq_rollup = simple_olap::rollup_time_mean(seq_cube);
-    auto seq_rollup_end = Timer::now();
-    double seq_rollup_time = Timer::elapsed(seq_rollup_start, seq_rollup_end);
-
-    auto par_rollup_start = Timer::now();
-    auto par_rollup = parallel_olap::rollup_time_mean(par_cube);
-    auto par_rollup_end = Timer::now();
-    double par_rollup_time = Timer::elapsed(par_rollup_start, par_rollup_end);
-
-    results.push_back({"rollup_time_mean", dc_rollup_time, seq_rollup_time, par_rollup_time,
-                       dc_rollup_time / seq_rollup_time, dc_rollup_time / par_rollup_time});
-    std::cout << "  Datacube:    " << std::fixed << std::setprecision(4) << dc_rollup_time << "s\n";
-    std::cout << "  SimpleCube:  " << seq_rollup_time << "s\n";
-    std::cout << "  Parallel:    " << par_rollup_time << "s\n";
-    std::cout << "  Speedup (SimpleCube): " << (dc_rollup_time / seq_rollup_time) << "x\n";
-    std::cout << "  Speedup (Parallel):   " << (dc_rollup_time / par_rollup_time) << "x\n\n";
-
-    // ---- Export Results ----
-    std::ofstream file("benchmark_results.csv");
-    file << "operation,datacube_time,simplecube_time,parallel_time,speedup_simplecube,speedup_parallel\n";
-    for (const auto& r : results) {
-        file << r.operation << ","
-             << std::fixed << std::setprecision(6)
-             << r.datacube_time << ","
-             << r.simplecube_time << ","
-             << r.parallel_time << ","
-             << std::setprecision(4)
-             << r.speedup_simple << ","
-             << r.speedup_parallel << "\n";
+        benchmark::run_benchmark_generic(T,LAT,LON);
+        return 0;
     }
-    file.close();
 
-    std::cout << "=== Benchmark Complete ===\n";
-    std::cout << "Results exported to benchmark_results.csv\n";
-    std::cout << "Run 'python build/visualize_benchmark.py' to see the comparison graph.\n";
-}
+    std::cout << "Usage: ./gpmcube T LAT LON\n";
+    return 0;
 
-int main() {
     std::string path = "/media/muqeeth26832/KALI LINUX/GPM_DPR_India_2024.zarr/2D/";
 
     std::cout << "=== GPM Datacube Project ===\n";
     std::cout << "Select mode:\n";
     std::cout << "1. Datacube (flat vector storage)\n";
     std::cout << "2. SimpleCube (3D vector storage)\n";
-    std::cout << "3. Basic Benchmark (Datacube vs SimpleCube vs Parallel)\n";
-    std::cout << "4. Size Benchmark ALL(Vary cube size, compare implementations)\n";
-    std::cout << "5. Slice Full Sweep (Vary size, threads, chunk, tile)\n";
+    std::cout << "3. Basic Benchmark (Datacube vs SimpleCube vs Parallel vs OMP)\n";
+    std::cout << "4. No Actual data benchmarks\n";
     std::cout << "Choice: ";
 
     std::string choice;
@@ -661,28 +477,10 @@ int main() {
 
         run_benchmark(lat_data, lon_data, nsr_data, timestamp_data);
     }
-    else if (choice == "4")
+    else if(choice=="4")
     {
-        // Size sweep benchmark (synthetic cubes)
-        run_size_sweep_benchmark();
-    }
-    else if (choice == "5")
-    {
-        std::cout << "Slice benchmarks (full sweep)...\n";
-
-        benchmark::SweepConfig config;
-
-        config.sizes = {256, 512, 1024, 2048};
-        config.threads = {1, 2, 4, 8};
-        config.chunk_sizes = {1, 8, 32, 128};
-        config.tile_sizes = {8, 16, 32, 64};
-        config.trials = 5;
-
-        benchmark::run_full_slice_sweep(
-            config,
-            "slice_full_sweep.csv");
-
-        std::cout << "Full slice sweep saved to slice_full_sweep.csv\n";
+        std::cout<<"BENCHMARKS....\n";
+        benchmark::run_benchmark_generic(586, 140,140);
     }
     else
     {
@@ -738,4 +536,249 @@ int main() {
     }
 
     return 0;
+}
+
+
+void run_benchmark(
+    const std::vector<float>& lat_data,
+    const std::vector<float>& lon_data,
+    const std::vector<float>& nsr_data,
+    const std::vector<std::string>& timestamp_data)
+{
+    std::cout << "\n=== Benchmark: Datacube vs SimpleCube vs Thread vs OpenMP ===\n\n";
+
+    struct BenchmarkResult {
+        std::string operation;
+
+        double datacube_time;
+        double simple_time;
+        double thread_time;
+        double omp_time;
+
+        double speedup_simple;
+        double speedup_thread;
+        double speedup_omp;
+    };
+
+    std::vector<BenchmarkResult> results;
+
+    // ---------------------------------------------------------
+    // BUILD CUBES
+    // ---------------------------------------------------------
+
+    std::cout << "Building cubes...\n";
+
+    auto t0 = Timer::now();
+    auto dc_cube = DefaultCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto t1 = Timer::now();
+
+    auto seq_cube = SimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto t2 = Timer::now();
+
+    auto thread_cube = ParallelSimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto t3 = Timer::now();
+
+    auto omp_cube = OMPSimpleCubeBuilder::build(lat_data, lon_data, nsr_data, timestamp_data);
+    auto t4 = Timer::now();
+
+    double dc_build = Timer::elapsed(t0,t1);
+    double seq_build = Timer::elapsed(t1,t2);
+    double thread_build = Timer::elapsed(t2,t3);
+    double omp_build = Timer::elapsed(t3,t4);
+
+    results.push_back({
+        "build_cube",
+        dc_build,
+        seq_build,
+        thread_build,
+        omp_build,
+        dc_build/seq_build,
+        dc_build/thread_build,
+        dc_build/omp_build
+    });
+
+    std::cout << "Build times:\n";
+    std::cout << "  Datacube   : " << dc_build << " s\n";
+    std::cout << "  SimpleCube : " << seq_build << " s\n";
+    std::cout << "  Thread     : " << thread_build << " s\n";
+    std::cout << "  OpenMP     : " << omp_build << " s\n\n";
+
+    // ---------------------------------------------------------
+    // WARMUP
+    // ---------------------------------------------------------
+
+    simple_olap::slice_time(seq_cube,0);
+    parallel_olap::slice_time(thread_cube,0);
+    omp_olap::slice_time(omp_cube,0);
+
+    // ---------------------------------------------------------
+    // SLICE
+    // ---------------------------------------------------------
+
+    std::cout << "Benchmarking slice_time...\n";
+
+    size_t slice_t = 0;
+
+    auto s0 = Timer::now();
+    auto dc_slice = olap::slice_time(dc_cube, slice_t);
+    auto s1 = Timer::now();
+
+    auto seq_slice = simple_olap::slice_time(seq_cube, slice_t);
+    auto s2 = Timer::now();
+
+    auto thread_slice = parallel_olap::slice_time(thread_cube, slice_t);
+    auto s3 = Timer::now();
+
+    auto omp_slice = omp_olap::slice_time(omp_cube, slice_t);
+    auto s4 = Timer::now();
+
+    double dc_slice_t = Timer::elapsed(s0,s1);
+    double seq_slice_t = Timer::elapsed(s1,s2);
+    double thread_slice_t = Timer::elapsed(s2,s3);
+    double omp_slice_t = Timer::elapsed(s3,s4);
+
+    results.push_back({
+        "slice_time",
+        dc_slice_t,
+        seq_slice_t,
+        thread_slice_t,
+        omp_slice_t,
+        dc_slice_t/seq_slice_t,
+        dc_slice_t/thread_slice_t,
+        dc_slice_t/omp_slice_t
+    });
+
+    // ---------------------------------------------------------
+    // DICE
+    // ---------------------------------------------------------
+
+    std::cout << "Benchmarking dice_time...\n";
+
+    size_t t_start = 0;
+    size_t t_end = std::min((size_t)10, dc_cube.time_dim());
+
+    auto d0 = Timer::now();
+    auto dc_dice = olap::dice_time(dc_cube,t_start,t_end);
+    auto d1 = Timer::now();
+
+    auto seq_dice = simple_olap::dice_time(seq_cube,t_start,t_end);
+    auto d2 = Timer::now();
+
+    auto thread_dice = parallel_olap::dice_time(thread_cube,t_start,t_end);
+    auto d3 = Timer::now();
+
+    auto omp_dice = omp_olap::dice_time(omp_cube,t_start,t_end);
+    auto d4 = Timer::now();
+
+    double dc_dice_t = Timer::elapsed(d0,d1);
+    double seq_dice_t = Timer::elapsed(d1,d2);
+    double thread_dice_t = Timer::elapsed(d2,d3);
+    double omp_dice_t = Timer::elapsed(d3,d4);
+
+    results.push_back({
+        "dice_time",
+        dc_dice_t,
+        seq_dice_t,
+        thread_dice_t,
+        omp_dice_t,
+        dc_dice_t/seq_dice_t,
+        dc_dice_t/thread_dice_t,
+        dc_dice_t/omp_dice_t
+    });
+
+    // ---------------------------------------------------------
+    // ROLLUP MEAN
+    // ---------------------------------------------------------
+
+    std::cout << "Benchmarking rollup_time_mean...\n";
+
+    auto r0 = Timer::now();
+    auto dc_roll = olap::rollup_time_mean(dc_cube);
+    auto r1 = Timer::now();
+
+    auto seq_roll = simple_olap::rollup_time_mean(seq_cube);
+    auto r2 = Timer::now();
+
+    auto thread_roll = parallel_olap::rollup_time_mean(thread_cube);
+    auto r3 = Timer::now();
+
+    auto omp_roll = omp_olap::rollup_time_mean(omp_cube);
+    auto r4 = Timer::now();
+
+    double dc_roll_t = Timer::elapsed(r0,r1);
+    double seq_roll_t = Timer::elapsed(r1,r2);
+    double thread_roll_t = Timer::elapsed(r2,r3);
+    double omp_roll_t = Timer::elapsed(r3,r4);
+
+    results.push_back({
+        "rollup_time_mean",
+        dc_roll_t,
+        seq_roll_t,
+        thread_roll_t,
+        omp_roll_t,
+        dc_roll_t/seq_roll_t,
+        dc_roll_t/thread_roll_t,
+        dc_roll_t/omp_roll_t
+    });
+
+    // ---------------------------------------------------------
+    // GLOBAL MEAN
+    // ---------------------------------------------------------
+
+    std::cout << "Benchmarking global_mean...\n";
+
+    auto g0 = Timer::now();
+    auto dc_g = olap::global_mean(dc_cube);
+    auto g1 = Timer::now();
+
+    auto seq_g = simple_olap::global_mean(seq_cube);
+    auto g2 = Timer::now();
+
+    auto thread_g = parallel_olap::global_mean(thread_cube);
+    auto g3 = Timer::now();
+
+    auto omp_g = omp_olap::global_mean(omp_cube);
+    auto g4 = Timer::now();
+
+    double dc_g_t = Timer::elapsed(g0,g1);
+    double seq_g_t = Timer::elapsed(g1,g2);
+    double thread_g_t = Timer::elapsed(g2,g3);
+    double omp_g_t = Timer::elapsed(g3,g4);
+
+    results.push_back({
+        "global_mean",
+        dc_g_t,
+        seq_g_t,
+        thread_g_t,
+        omp_g_t,
+        dc_g_t/seq_g_t,
+        dc_g_t/thread_g_t,
+        dc_g_t/omp_g_t
+    });
+
+    // ---------------------------------------------------------
+    // EXPORT CSV
+    // ---------------------------------------------------------
+
+    std::ofstream file("benchmark_results.csv");
+
+    file << "operation,datacube_time,simple_time,thread_time,omp_time,"
+         << "speedup_simple,speedup_thread,speedup_omp\n";
+
+    for(const auto& r : results)
+    {
+        file << r.operation << ","
+             << r.datacube_time << ","
+             << r.simple_time << ","
+             << r.thread_time << ","
+             << r.omp_time << ","
+             << r.speedup_simple << ","
+             << r.speedup_thread << ","
+             << r.speedup_omp << "\n";
+    }
+
+    file.close();
+
+    std::cout << "\nBenchmark finished.\n";
+    std::cout << "Results written to benchmark_results.csv\n";
 }

@@ -28,11 +28,12 @@ SimpleCubeBuilder::build(
 
     for (const auto& ts : timestamps)
     {
-        std::string hour = ts.substr(0, 13); // YYYY-MM-DDTHH
+        std::string_view hour(ts.data(), 13);
 
-        if (time_index.find(hour) == time_index.end())
+        auto it = time_index.find(std::string(hour));
+        if (it == time_index.end())
         {
-            time_index[hour] = time_counter++;
+            time_index.emplace(std::string(hour), time_counter++);
         }
     }
 

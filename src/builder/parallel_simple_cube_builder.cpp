@@ -34,9 +34,17 @@ ParallelSimpleCubeBuilder::build(
     size_t time_counter = 0;
 
     for (const auto& ts : timestamps) {
-        std::string hour = ts.substr(0, 13);
-        if (time_index.find(hour) == time_index.end()) {
-            time_index[hour] = time_counter++;
+        // std::string hour = ts.substr(0, 13);
+        // if (time_index.find(hour) == time_index.end()) {
+        //     time_index[hour] = time_counter++;
+        // }
+
+        std::string_view hour(ts.data(), 13);
+
+        auto it = time_index.find(std::string(hour));
+        if (it == time_index.end())
+        {
+            time_index.emplace(std::string(hour), time_counter++);
         }
     }
 
