@@ -17,9 +17,10 @@ SimpleCube<Dtype> slice_time(const SimpleCube<Dtype>& cube, size_t t)
 
     SimpleCube<Dtype> result(1, LAT, LON);
 
-#pragma omp parallel for collapse(2) schedule(static)
+#pragma omp parallel for schedule(static)
     for (size_t lat = 0; lat < LAT; ++lat)
     {
+    #pragma omp simd
         for (size_t lon = 0; lon < LON; ++lon)
         {
             result.at(0, lat, lon) = cube.at(t, lat, lon);
@@ -45,11 +46,12 @@ SimpleCube<Dtype> dice(const SimpleCube<Dtype>& cube,
 
     SimpleCube<Dtype> result(newT, newLAT, newLON);
 
-#pragma omp parallel for collapse(3) schedule(static)
+#pragma omp parallel for schedule(static)
     for (size_t t = 0; t < newT; ++t)
     {
         for (size_t lat = 0; lat < newLAT; ++lat)
         {
+        #pragma omp simd
             for (size_t lon = 0; lon < newLON; ++lon)
             {
                 result.at(t, lat, lon) =
@@ -96,6 +98,34 @@ SimpleCube<Dtype> dice_region(const SimpleCube<Dtype>& cube,
 // ROLLUP TIME MEAN
 //////////////////////////////////////////////////////////////
 
+// template<typename Dtype>
+// SimpleCube<Dtype> rollup_time_mean(const SimpleCube<Dtype>& cube)
+// {
+//     size_t T   = cube.time_dim();
+//     size_t LAT = cube.lat_dim();
+//     size_t LON = cube.lon_dim();
+
+//     SimpleCube<Dtype> result(1, LAT, LON);
+
+// #pragma omp parallel for collapse(2) schedule(static,10)
+//     for (size_t lat = 0; lat < LAT; ++lat)
+//     {
+//         for (size_t lon = 0; lon < LON; ++lon)
+//         {
+//             Dtype sum = 0;
+
+//             for (size_t t = 0; t < T; ++t)
+//             {
+//                 sum += cube.at(t, lat, lon);
+//             }
+
+//             result.at(0, lat, lon) = sum / static_cast<Dtype>(T);
+//         }
+//     }
+
+//     return result;
+// }
+
 template<typename Dtype>
 SimpleCube<Dtype> rollup_time_mean(const SimpleCube<Dtype>& cube)
 {
@@ -105,25 +135,37 @@ SimpleCube<Dtype> rollup_time_mean(const SimpleCube<Dtype>& cube)
 
     SimpleCube<Dtype> result(1, LAT, LON);
 
-#pragma omp parallel for collapse(2) schedule(static,10)
+#pragma omp parallel
+{
+    // initialize
+#pragma omp for collapse(2) schedule(static)
     for (size_t lat = 0; lat < LAT; ++lat)
-    {
         for (size_t lon = 0; lon < LON; ++lon)
+            result.at(0, lat, lon) = 0;
+
+    // accumulate
+    for (size_t t = 0; t < T; ++t)
+    {
+#pragma omp for schedule(static)
+        for (size_t lat = 0; lat < LAT; ++lat)
         {
-            Dtype sum = 0;
-
-            for (size_t t = 0; t < T; ++t)
+#pragma omp simd
+            for (size_t lon = 0; lon < LON; ++lon)
             {
-                sum += cube.at(t, lat, lon);
+                result.at(0, lat, lon) += cube.at(t, lat, lon);
             }
-
-            result.at(0, lat, lon) = sum / static_cast<Dtype>(T);
         }
     }
 
-    return result;
+    // normalize
+#pragma omp for collapse(2) schedule(static)
+    for (size_t lat = 0; lat < LAT; ++lat)
+        for (size_t lon = 0; lon < LON; ++lon)
+            result.at(0, lat, lon) /= static_cast<Dtype>(T);
 }
 
+    return result;
+}
 
 
 
@@ -172,11 +214,12 @@ Dtype global_mean(const SimpleCube<Dtype>& cube)
 
     Dtype sum = 0;
 
-#pragma omp parallel for collapse(3) reduction(+:sum) schedule(static)
+#pragma omp parallel for reduction(+:sum) schedule(static)
     for (size_t t = 0; t < T; ++t)
     {
         for (size_t lat = 0; lat < LAT; ++lat)
         {
+            #pragma omp simd reduction(+:sum)
             for (size_t lon = 0; lon < LON; ++lon)
             {
                 sum += cube.at(t, lat, lon);
@@ -186,6 +229,7 @@ Dtype global_mean(const SimpleCube<Dtype>& cube)
 
     return sum / static_cast<Dtype>(T * LAT * LON);
 }
+
 
 //////////////////////////////////////////////////////////////
 // REGION MEAN

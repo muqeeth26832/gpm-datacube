@@ -8,7 +8,7 @@ EXEC = "./gpmcube"
 LAT = 140
 LON = 140
 
-T_VALUES = [500, 1000, 2000, 3000, 4000, 5000]
+T_VALUES = [500, 1000, 2000, 3000, 4000, 5000,10000]
 
 OUTPUT_DIR = "nodata"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
